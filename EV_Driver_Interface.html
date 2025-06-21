@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EV DR Interaction</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: #f8f9fa;
+      color: #212529;
+      padding: 2rem;
+      max-width: 500px;
+      margin: auto;
+    }
+    .question {
+      margin-bottom: 2rem;
+    }
+    .button {
+      display: inline-block;
+      padding: 0.6rem 1.2rem;
+      margin: 0.5rem 0.5rem 0 0;
+      font-size: 1rem;
+      color: #fff;
+      background-color: #007bff;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .button.secondary {
+      background-color: #6c757d;
+    }
+    input[type="number"],
+    select {
+      font-size: 1rem;
+      padding: 0.4rem;
+      margin-top: 0.5rem;
+    }
+    .soc-option {
+      margin: 0.5rem 0;
+    }
+    #history {
+      background-color: #e9ecef;
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+    }
+    #canvas-header-actions::after {
+      content: '';
+      display: inline-block;
+      margin-left: 10px;
+    }
+    #downloadHTML, #shareHTML {
+      margin-left: 8px;
+      padding: 4px 8px;
+      font-size: 0.9rem;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div id="history"></div>
+  <div id="interaction"></div>
+
+  <script>
+    // === Insert download/share buttons in header ===
+    window.addEventListener("load", () => {
+      const header = document.querySelector("#canvas-header-actions");
+      if (header && !document.getElementById("downloadHTML")) {
+        const downloadBtn = document.createElement("button");
+        downloadBtn.id = "downloadHTML";
+        downloadBtn.innerText = "Download";
+        downloadBtn.onclick = () => {
+          const blob = new Blob([document.documentElement.outerHTML], { type: "text/html" });
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(blob);
+          link.download = "ev_dr_interaction.html";
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        };
+
+        const shareBtn = document.createElement("button");
+        shareBtn.id = "shareHTML";
+        shareBtn.innerText = "Share";
+        shareBtn.onclick = () => {
+          navigator.clipboard.writeText(window.location.href);
+          alert("Page link copied to clipboard!");
+        };
+
+        header.appendChild(downloadBtn);
+        header.appendChild(shareBtn);
+      }
+    });
+
+    // === Interaction logic ===
+    const interaction = document.getElementById("interaction");
+    const historyDiv = document.getElementById("history");
+    let answers = [];
+    let currentStep = 0;
+    let chargingAnswer = "";
+
+    function generateTimeSelector(idPrefix) {
+      let hours = '<select id="' + idPrefix + 'Hour">';
+      for (let h = 0; h < 24; h++) {
+        const hh = h.toString().padStart(2, "0");
+        hours += `<option value="${hh}">${hh}</option>`;
+      }
+      hours += "</select>";
+
+      let minutes = '<select id="' + idPrefix + 'Minute">';
+      for (let m = 0; m < 60; m++) {
+        const mm = m.toString().padStart(2, "0");
+        minutes += `<option value="${mm}">${mm}</option>`;
+      }
+      minutes += "</select>";
+
+      return hours + " : " + minutes + '<br><small style="color:gray;">(hh:mm, 24-hour)</small>';
+    }
+
+    const questions = [
+      function step1() {
+        const now = new Date().toLocaleTimeString('en-GB', { hour12: false, hour: "2-digit", minute: "2-digit" });
+        const content = `
+          <div class="question">
+            <p>1. Do you agree to participate in the DR after connecting to the charging pile? <strong>${now}</strong></p>
+            <button class="button" onclick="saveAnswer('Q1: Yes'); nextStep()">Yes</button>
+            <button class="button secondary" onclick="saveAnswer('Q1: No'); endSession()">No</button>
+          </div>`;
+        interaction.innerHTML = content;
+      },
+      function step2() {
+        const content = `
+          <div class="question">
+            <p>2. Start charging after finishing this talk?</p>
+            <button class="button" onclick="chargingAnswer='Yes'; saveAnswer('Q2: Yes'); nextStep()">Yes</button>
+            <button class="button secondary" onclick="chargingAnswer='No';">No</button>
+            <br><br>
+            <label>Specific time (24-hour):</label><br>
+            ${generateTimeSelector("start")}
+            <br><br>
+            <button class="button" onclick="handleSpecificTime()">Next</button>
+          </div>`;
+        interaction.innerHTML = content;
+      },
+      function step3() {
+        const content = `
+          <div class="question">
+            <p>3. When do you prefer to stop charging?</p>
+            ${generateTimeSelector("stop")}
+            <br><br>
+            <button class="button" onclick="saveTime('Q3:', document.getElementById('stopHour').value + ':' + document.getElementById('stopMinute').value); nextStep()">Next</button>
+          </div>`;
+        interaction.innerHTML = content;
+      },
+      function step4() {
+        const content = `
+          <div class="question">
+            <p>4. Tolerable delay in charging completion?</p>
+            <input type="number" placeholder="Hours" id="delayHour" />
+            <br><br>
+            <button class="button" onclick="saveAnswer('Q4: ' + document.getElementById('delayHour').value + ' hour(s)'); nextStep()">Next</button>
+          </div>`;
+        interaction.innerHTML = content;
+      },
+      function step5() {
+        const content = `
+          <div class="question">
+            <p>5. Initial SOC / Desired SOC?</p>
+            <div><label>Initial SOC: <input type="number" id="initialSOC" step="0.01" min="0" max="1"></label></div>
+            <div class="soc-option"><input type="radio" name="soc" value="0.5"> Desired SOC: 0.5</div>
+            <div class="soc-option"><input type="radio" name="soc" value="0.6" checked> Desired SOC: 0.6</div>
+            <div class="soc-option"><input type="radio" name="soc" value="0.7"> Desired SOC: 0.7</div>
+            <div class="soc-option"><input type="radio" name="soc" value="0.8"> Desired SOC: 0.8</div>
+            <br><br>
+            <button class="button" onclick="handleSOCSubmit()">Next</button>
+          </div>`;
+        interaction.innerHTML = content;
+      },
+      function step6() {
+        const content = `
+          <div class="question">
+            <p>6. Rated capacity of your EV / EV age (in years)?</p>
+            <label>Rated Capacity (kWh): <input type="number" id="capacity" step="1" min="1"></label>
+            <br><br>
+            <label>EV Age (years): <input type="number" id="evAge" step="1" min="0"></label>
+            <br><br>
+            <button class="button" onclick="validateFinalInput()">Submit</button>
+          </div>`;
+        interaction.innerHTML = content;
+      },
+    ];
+
+    function updateHistory() {
+      historyDiv.innerHTML =
+        "<strong>Answered so far:</strong><br>" +
+        answers.map((a, i) => `<div>${i + 1}. ${a}</div>`).join("");
+    }
+
+    function saveAnswer(answer) {
+      answers[currentStep] = answer;
+      updateHistory();
+    }
+
+    function saveTime(prefix, value) {
+      if (value) {
+        answers[currentStep] = prefix + value;
+        updateHistory();
+      }
+    }
+
+    function handleSpecificTime() {
+      if (chargingAnswer === "Yes") {
+        nextStep();
+        return;
+      }
+      const hour = document.getElementById("startHour").value;
+      const minute = document.getElementById("startMinute").value;
+      if (!hour || !minute) {
+        alert("Please select a specific time to proceed.");
+        return;
+      }
+      saveAnswer("Q2: No; Specific time: " + hour + ":" + minute);
+      nextStep();
+    }
+
+    function handleSOCSubmit() {
+      const socVal = document.getElementById("initialSOC").value;
+      const selectedDesiredSOC = document.querySelector('input[name="soc"]:checked').value;
+      if (!socVal || socVal < 0 || socVal > 1) {
+        alert("Please input a valid initial SOC between 0 and 1.");
+        return;
+      }
+      answers[currentStep] = `Q5: Initial SOC ${socVal}, Desired SOC ${selectedDesiredSOC}`;
+      updateHistory();
+      nextStep();
+    }
+
+    function validateFinalInput() {
+      const capacity = document.getElementById("capacity").value;
+      const evAge = document.getElementById("evAge").value;
+      if (!capacity || !evAge) {
+        alert("Please enter both rated capacity and EV age.");
+        return;
+      }
+      saveAnswer('Q6: ' + capacity + ' kWh / ' + evAge + ' year(s)');
+      endMessage();
+    }
+
+    function nextStep() {
+      currentStep++;
+      if (currentStep < questions.length) {
+        questions[currentStep]();
+      }
+    }
+
+    function endSession() {
+      updateHistory();
+      interaction.innerHTML = `<p>Thanks for your time, enjoying the refueling time!</p>`;
+    }
+
+    function endMessage() {
+      updateHistory();
+      const q3 = answers.find(a => a.startsWith("Q3:"));
+      const q4 = answers.find(a => a.startsWith("Q4:"));
+      if (!q3 || !q4) {
+        interaction.innerHTML = `<p>Error: Time information is incomplete.</p>`;
+        return;
+      }
+      const [stopHour, stopMinute] = q3.replace("Q3:", "").trim().split(":").map(Number);
+      const delayHours = parseFloat(q4.replace("Q4:", "").replace("hour(s)", "").trim());
+
+      let stopTime = new Date();
+      stopTime.setHours(stopHour, stopMinute, 0, 0);
+      stopTime.setTime(stopTime.getTime() + delayHours * 60 * 60 * 1000);
+
+      const endHour = stopTime.getHours().toString().padStart(2, '0');
+      const endMinute = stopTime.getMinutes().toString().padStart(2, '0');
+
+      interaction.innerHTML = `<p>Thanks for your patience. The charging and DR process will conduct from now on until <strong>${endHour}:${endMinute}</strong>!</p>`;
+    }
+
+    questions[0]();
+  </script>
+</body>
+</html>
